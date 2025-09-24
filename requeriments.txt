@@ -1,0 +1,23 @@
+# Pacotes (arquivo requirements.txt padrão)
+streamlit==1.39.0
+azure-identity==1.16.0
+requests==2.31.0
+PyYAML==6.0.2
+pandas==2.2.2
+dremio-simple-query==0.1.3
+playwright==1.47.0
+aiohttp==3.9.5
+pyodbc==4.0.39
+
+--------------------------------------------------------------------------------------------------------
+# pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org streamlit==1.39.0
+# pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org azure-identity==1.16.0
+# pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org requests==2.31.0
+# pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org PyYAML==6.0.2
+# pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org pandas==2.2.2
+# pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org dremio-simple-query==0.1.3
+# pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org playwright==1.47.0
+# pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org aiohttp==3.9.5
+# pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org pyodbc==4.0.39
+
+# playwright install
