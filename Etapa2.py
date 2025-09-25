@@ -12,27 +12,48 @@ os.environ['SSL_CERT_FILE'] = certifi.where()
 
 # ---------------- Carregar Configurações do Arquivo Purview ----------------
 def carregar_configuracoes():
-    """Carrega as configurações do arquivo Purview na pasta Credenciais"""
-    credenciais_path = Path("Credenciais") / "Purview"
+    """Carrega as configurações do arquivo Purview.env na pasta Credenciais"""
+    credenciais_path = Path("Credenciais") / "Purview.env"
     
     if not credenciais_path.exists():
         raise FileNotFoundError(f"❌ Arquivo de configurações não encontrado: {credenciais_path}")
     
     configuracoes = {}
-    with open(credenciais_path, 'r') as f:
+    with open(credenciais_path, 'r', encoding='utf-8') as f:
         for linha in f:
             linha = linha.strip()
             if linha and not linha.startswith('#') and '=' in linha:
-                chave, valor = linha.split('=', 1)
-                configuracoes[chave.strip()] = valor.strip().strip('"\'')
+                # Dividir no primeiro '=' para lidar com valores que podem conter '='
+                partes = linha.split('=', 1)
+                chave = partes[0].strip()
+                valor = partes[1].strip() if len(partes) > 1 else ""
+                
+                # Remover aspas se presentes
+                valor = valor.strip('"\'')
+                configuracoes[chave] = valor
+    
+    # Mapear nomes das variáveis (compatibilidade)
+    mapeamento = {
+        'TENANT_ID': 'tenant_id',
+        'PURVIEW_ACCOUNT_NAME': 'purview_account_name', 
+        'SCOPE': 'scope'
+    }
+    
+    configuracoes_mapeadas = {}
+    for chave_original, valor in configuracoes.items():
+        chave_normalizada = chave_original.upper().replace(' ', '_')
+        if chave_normalizada in mapeamento:
+            configuracoes_mapeadas[mapeamento[chave_normalizada]] = valor
+        else:
+            configuracoes_mapeadas[chave_normalizada.lower()] = valor
     
     # Validar configurações obrigatórias
-    obrigatorias = ['Ternant_ID', 'Purview_account_name', 'Scope']
+    obrigatorias = ['tenant_id', 'purview_account_name', 'scope']
     for obrigatoria in obrigatorias:
-        if obrigatoria not in configuracoes:
-            raise ValueError(f"❌ Configuração obrigatória não encontrada: {obrigatoria}")
+        if obrigatoria not in configuracoes_mapeadas:
+            raise ValueError(f"❌ Configuração obrigatória não encontrada: {obrigatoria}. Configurações encontradas: {list(configuracoes_mapeadas.keys())}")
     
-    return configuracoes
+    return configuracoes_mapeadas
 
 # ---------------- Cache de Token Personalizado ----------------
 class CustomTokenCache:
@@ -89,8 +110,8 @@ def get_access_token(configuracoes):
     Usa InteractiveBrowserCredential com cache de token e cookies
     Tenta usar cache primeiro, só abre navegador se necessário
     """
-    tenant_id = configuracoes['Ternant_ID']
-    scope = configuracoes['Scope']
+    tenant_id = configuracoes['tenant_id']
+    scope = configuracoes['scope']
     
     # Inicializar cache personalizado
     cache = CustomTokenCache()
@@ -221,7 +242,7 @@ def salvar_yaml_completo(guid, entity_data, purview_account):
         )
 
     print(f"✅ YAML completo salvo em {caminho}")
-    print(f"📊 Tamanho do arquivo: {os.path.getsize(cambia)} bytes")
+    print(f"📊 Tamanho do arquivo: {os.path.getsize(caminho)} bytes")
     
     # Estatísticas do conteúdo
     entity_count = len(dados_completos.get('referredEntities', {}))
@@ -243,11 +264,12 @@ if __name__ == "__main__":
 
     try:
         # Carregar configurações do arquivo
-        print("📁 Carregando configurações do arquivo Purview...")
+        print("📁 Carregando configurações do arquivo Purview.env...")
         configuracoes = carregar_configuracoes()
         
-        purview_account = configuracoes['Purview_account_name']
+        purview_account = configuracoes['purview_account_name']
         print(f"✅ Configurações carregadas. Purview Account: {purview_account}")
+        print(f"📋 Configurações carregadas: {list(configuracoes.keys())}")
         
         # Autenticação com cache
         token = get_access_token(configuracoes)
@@ -263,10 +285,10 @@ if __name__ == "__main__":
         
     except FileNotFoundError as e:
         print(f"❌ Erro: {e}")
-        print("💡 Crie o arquivo Credenciais/Purview com as seguintes variáveis:")
-        print("Ternant_ID=seu_tenant_id")
-        print("Purview_account_name=seu_purview_account")
-        print("Scope=https://purview.azure.net/.default")
+        print("💡 Crie o arquivo Credenciais/Purview.env com as seguintes variáveis:")
+        print("TENANT_ID = f9cfdcb-c4a5-4677-b65d-3150dda310c9")
+        print("PURVIEW_ACCOUNT_NAME = purviewb3")
+        print("SCOPE = https://purview.azure.net/.default")
         sys.exit(1)
         
     except Exception as e:
