@@ -154,29 +154,6 @@ def get_purview_entity(guid, token, purview_account):
     response.raise_for_status()
     return response.json()
 
-def get_purview_entity_columns_only(guid, token, purview_account):
-    """
-    Busca apenas as informações de colunas de uma entidade
-    """
-    entity_data = get_purview_entity(guid, token, purview_account)
-    
-    # Filtrar para retornar apenas informações relevantes para colunas
-    filtered_data = {
-        "entity": {
-            "guid": entity_data.get("entity", {}).get("guid"),
-            "typeName": entity_data.get("entity", {}).get("typeName"),
-            "attributes": {}
-        },
-        "columns": []
-    }
-    
-    # Extrair informações de colunas dos atributos
-    attributes = entity_data.get("entity", {}).get("attributes", {})
-    if "columns" in attributes:
-        filtered_data["columns"] = attributes["columns"]
-    
-    return filtered_data
-
 # ---------------- Funções para Limpeza de Dados Complexos ----------------
 def limpar_dados_para_yaml(dados):
     """
@@ -243,27 +220,39 @@ def buscar_schema_e_colunas(guid, token, purview_account, entity_data):
     """
     try:
         # Verificar se é aws_s3_v2_resource_set e se tem attachedSchema
-        entity_attributes = entity_data.get("entity", {}).get("attributes", {})
-        attached_schema_guid = entity_attributes.get("attachedSchema", {}).get("guid")
+        relationship_attrs = entity_data.get("entity", {}).get("relationshipAttributes", {})
+        attached_schema_list = relationship_attrs.get("attachedSchema", [])
+        
+        if not attached_schema_list:
+            print("ℹ️  Entidade aws_s3_v2_resource_set não possui attachedSchema")
+            return None
+        
+        # Pegar o primeiro schema da lista (geralmente só tem um)
+        attached_schema = attached_schema_list[0]
+        attached_schema_guid = attached_schema.get("guid")
         
         if not attached_schema_guid:
-            print("ℹ️  Entidade aws_s3_v2_resource_set não possui attachedSchema")
+            print("ℹ️  GUID do attachedSchema não encontrado")
             return None
         
         print(f"🔍 Buscando schema attached: {attached_schema_guid}")
         
-        # Buscar dados do schema attached
-        schema_data = get_purview_entity_columns_only(attached_schema_guid, token, purview_account)
+        # Buscar dados COMPLETOS do schema attached (não filtrar)
+        schema_data = get_purview_entity(attached_schema_guid, token, purview_account)
         
         return {
             "attachedSchema": {
                 "guid": attached_schema_guid,
-                "data": schema_data
+                "typeName": attached_schema.get("typeName"),
+                "displayText": attached_schema.get("displayText"),
+                "data": schema_data  # Dados completos do schema
             }
         }
         
     except Exception as e:
         print(f"⚠️  Erro ao buscar schema attached: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 # ---------------- Salvar YAML Completo ----------------
@@ -328,14 +317,13 @@ if __name__ == "__main__":
         
         purview_account = configuracoes['purview_account_name']
         print(f"✅ Configurações carregadas. Purview Account: {purview_account}")
-        print(f"📋 Configurações carregadas: {list(configuracoes.keys())}")
         
         # Autenticação com cache
         token = get_access_token(configuracoes)
         
         print(f"📊 Buscando dados completos do GUID: {guid}")
         
-        # Buscar dados da entidade (apenas entity, sem lineage)
+        # Buscar dados da entidade
         entity_data = get_purview_entity(guid, token, purview_account)
         print("✅ Dados da entidade obtidos com sucesso")
         
@@ -346,10 +334,21 @@ if __name__ == "__main__":
         
         if entity_type == "aws_s3_v2_resource_set":
             print("🎯 Entidade identificada como aws_s3_v2_resource_set. Buscando schema attached...")
+            
+            # Debug: mostrar relationshipAttributes para verificar estrutura
+            relationship_attrs = entity_data.get("entity", {}).get("relationshipAttributes", {})
+            print(f"🔍 RelationshipAttributes keys: {list(relationship_attrs.keys())}")
+            if "attachedSchema" in relationship_attrs:
+                print(f"🔍 attachedSchema encontrado: {relationship_attrs['attachedSchema']}")
+            
             schema_data = buscar_schema_e_colunas(guid, token, purview_account, entity_data)
             
             if schema_data:
                 print("✅ Schema attached e colunas obtidos com sucesso")
+                # Debug: mostrar informações do schema
+                schema_guid = schema_data["attachedSchema"]["guid"]
+                schema_type = schema_data["attachedSchema"]["typeName"]
+                print(f"📋 Schema encontrado - GUID: {schema_guid}, Type: {schema_type}")
             else:
                 print("⚠️  Não foi possível obter o schema attached")
         else:
@@ -357,6 +356,8 @@ if __name__ == "__main__":
         
         # Salvar YAML com 100% das informações (incluindo schema se disponível)
         salvar_yaml_completo(guid, entity_data, purview_account, schema_data)
+        
+        print("🎉 Processamento concluído com sucesso!")
         
     except FileNotFoundError as e:
         print(f"❌ Erro: {e}")
