@@ -94,8 +94,7 @@ class CustomTokenCache:
         cache_key = f"{tenant_id}_{scope}"
         self.cache[cache_key] = {
             'access_token': token_data.token,
-            'expires_on': token_data.expires_on,
-            'token_type': token_data.token_type
+            'expires_on': token_data.expires_on
         }
         self._salvar_cache()
     
@@ -154,6 +153,29 @@ def get_purview_entity(guid, token, purview_account):
     response = requests.get(url, headers=headers)
     response.raise_for_status()
     return response.json()
+
+def get_purview_entity_columns_only(guid, token, purview_account):
+    """
+    Busca apenas as informações de colunas de uma entidade
+    """
+    entity_data = get_purview_entity(guid, token, purview_account)
+    
+    # Filtrar para retornar apenas informações relevantes para colunas
+    filtered_data = {
+        "entity": {
+            "guid": entity_data.get("entity", {}).get("guid"),
+            "typeName": entity_data.get("entity", {}).get("typeName"),
+            "attributes": {}
+        },
+        "columns": []
+    }
+    
+    # Extrair informações de colunas dos atributos
+    attributes = entity_data.get("entity", {}).get("attributes", {})
+    if "columns" in attributes:
+        filtered_data["columns"] = attributes["columns"]
+    
+    return filtered_data
 
 # ---------------- Funções para Limpeza de Dados Complexos ----------------
 def limpar_dados_para_yaml(dados):
@@ -214,15 +236,50 @@ def extrair_todas_informacoes(entity_data, purview_account, guid):
     
     return limpar_dados_para_yaml(dados_completos)
 
+# ---------------- Buscar Schema e Colunas para aws_s3_v2_resource_set ----------------
+def buscar_schema_e_colunas(guid, token, purview_account, entity_data):
+    """
+    Busca o schema attached e suas colunas para entidades do tipo aws_s3_v2_resource_set
+    """
+    try:
+        # Verificar se é aws_s3_v2_resource_set e se tem attachedSchema
+        entity_attributes = entity_data.get("entity", {}).get("attributes", {})
+        attached_schema_guid = entity_attributes.get("attachedSchema", {}).get("guid")
+        
+        if not attached_schema_guid:
+            print("ℹ️  Entidade aws_s3_v2_resource_set não possui attachedSchema")
+            return None
+        
+        print(f"🔍 Buscando schema attached: {attached_schema_guid}")
+        
+        # Buscar dados do schema attached
+        schema_data = get_purview_entity_columns_only(attached_schema_guid, token, purview_account)
+        
+        return {
+            "attachedSchema": {
+                "guid": attached_schema_guid,
+                "data": schema_data
+            }
+        }
+        
+    except Exception as e:
+        print(f"⚠️  Erro ao buscar schema attached: {e}")
+        return None
+
 # ---------------- Salvar YAML Completo ----------------
-def salvar_yaml_completo(guid, entity_data, purview_account):
+def salvar_yaml_completo(guid, entity_data, purview_account, schema_data=None):
     pasta = "Historico"
     os.makedirs(pasta, exist_ok=True)
 
     # Extrair 100% das informações
     dados_completos = extrair_todas_informacoes(entity_data, purview_account, guid)
+    
+    # Adicionar dados do schema se disponíveis
+    if schema_data:
+        dados_completos["attachedSchema"] = schema_data["attachedSchema"]
+        dados_completos["metadata"]["schema_request_url"] = f"https://{purview_account}.purview.azure.com/catalog/api/atlas/v2/entity/guid/{schema_data['attachedSchema']['guid']}"
 
-    caminho = os.path.join(pasta, f"{guid}_purview_completo.yaml")
+    caminho = os.path.join(pasta, f"{guid}_purview.yaml")
     
     # Configurar o dumper YAML para melhor formatação
     class IndentedDumper(yaml.SafeDumper):
@@ -248,11 +305,13 @@ def salvar_yaml_completo(guid, entity_data, purview_account):
     entity_count = len(dados_completos.get('referredEntities', {}))
     classifications = len(dados_completos.get('entity', {}).get('classifications', []))
     relationship_attrs = len(dados_completos.get('entity', {}).get('relationshipAttributes', {}))
+    has_schema = "attachedSchema" in dados_completos
     
     print(f"📈 Estatísticas:")
     print(f"   - Entidades referenciadas: {entity_count}")
     print(f"   - Classificações: {classifications}")
     print(f"   - Atributos de relacionamento: {relationship_attrs}")
+    print(f"   - Schema attached incluído: {has_schema}")
 
 # ---------------- Execução Principal ----------------
 if __name__ == "__main__":
@@ -280,15 +339,27 @@ if __name__ == "__main__":
         entity_data = get_purview_entity(guid, token, purview_account)
         print("✅ Dados da entidade obtidos com sucesso")
         
-        # Salvar YAML com 100% das informações (apenas entity)
-        salvar_yaml_completo(guid, entity_data, purview_account)
+        # Verificar se é aws_s3_v2_resource_set e buscar schema attached se necessário
+        schema_data = None
+        entity_type = entity_data.get("entity", {}).get("typeName")
+        print(f"🔍 Tipo da entidade: {entity_type}")
+        
+        if entity_type == "aws_s3_v2_resource_set":
+            print("🎯 Entidade identificada como aws_s3_v2_resource_set. Buscando schema attached...")
+            schema_data = buscar_schema_e_colunas(guid, token, purview_account, entity_data)
+            
+            if schema_data:
+                print("✅ Schema attached e colunas obtidos com sucesso")
+            else:
+                print("⚠️  Não foi possível obter o schema attached")
+        else:
+            print(f"ℹ️  Tipo de entidade {entity_type} não requer busca de schema adicional")
+        
+        # Salvar YAML com 100% das informações (incluindo schema se disponível)
+        salvar_yaml_completo(guid, entity_data, purview_account, schema_data)
         
     except FileNotFoundError as e:
         print(f"❌ Erro: {e}")
-        print("💡 Crie o arquivo Credenciais/Purview.env com as seguintes variáveis:")
-        print("TENANT_ID = f9cfdcb-c4a5-4677-b65d-3150dda310c9")
-        print("PURVIEW_ACCOUNT_NAME = purviewb3")
-        print("SCOPE = https://purview.azure.net/.default")
         sys.exit(1)
         
     except Exception as e:
